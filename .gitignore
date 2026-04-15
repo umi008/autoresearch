@@ -21,3 +21,16 @@ dev/
 
 # Results file
 results.tsv
+
+# ============================================
+# Autoresearch Trading
+# ============================================
+.env                    # Credenciales (NUNCA commitear)
+experiments.db          # SQLite database
+best_strategy.py        # Auto-generated
+logs/                   # Log files
+*.log
+.pytest_cache/
+.mypy_cache/
+autoresearch_trading/.env
+autoresearch-trading/.env

@@ -1,92 +1,204 @@
-# autoresearch
+# Autoresearch Trading
 
-![teaser](progress.png)
+Sistema de investigación autónoma para trading algorítmico, inspirado en [`karpathy/autoresearch`](https://github.com/karpathy/autoresearch).
 
-*One day, frontier AI research used to be done by meat computers in between eating, sleeping, having other fun, and synchronizing once in a while using sound wave interconnect in the ritual of "group meeting". That era is long gone. Research is now entirely the domain of autonomous swarms of AI agents running across compute cluster megastructures in the skies. The agents claim that we are now in the 10,205th generation of the code base, in any case no one could tell if that's right or wrong as the "code" is now a self-modifying binary that has grown beyond human comprehension. This repo is the story of how it all began. -@karpathy, March 2026*.
+El sistema usa un **agente LLM** que modifica iterativamente una estrategia de trading, la evalúa mediante backtesting con Walk-Forward Validation, y conserva únicamente los cambios que mejoran el Sharpe ratio.
 
-The idea: give an AI agent a small but real LLM training setup and let it experiment autonomously overnight. It modifies the code, trains for 5 minutes, checks if the result improved, keeps or discards, and repeats. You wake up in the morning to a log of experiments and (hopefully) a better model. The training code here is a simplified single-GPU implementation of [nanochat](https://github.com/karpathy/nanochat). The core idea is that you're not touching any of the Python files like you normally would as a researcher. Instead, you are programming the `program.md` Markdown files that provide context to the AI agents and set up your autonomous research org. The default `program.md` in this repo is intentionally kept as a bare bones baseline, though it's obvious how one would iterate on it over time to find the "research org code" that achieves the fastest research progress, how you'd add more agents to the mix, etc. A bit more context on this project is here in this [tweet](https://x.com/karpathy/status/2029701092347630069) and [this tweet](https://x.com/karpathy/status/2031135152349524125).
+---
 
-## How it works
+## Assets Operados
 
-The repo is deliberately kept small and only really has three files that matter:
+### Forex + Metales (via MetaTrader 5)
+```
+EURUSD, GBPUSD, USDJPY, AUDUSD, USDCHF, XAUUSD
+```
 
-- **`prepare.py`** — fixed constants, one-time data prep (downloads training data, trains a BPE tokenizer), and runtime utilities (dataloader, evaluation). Not modified.
-- **`train.py`** — the single file the agent edits. Contains the full GPT model, optimizer (Muon + AdamW), and training loop. Everything is fair game: architecture, hyperparameters, optimizer, batch size, etc. **This file is edited and iterated on by the agent**.
-- **`program.md`** — baseline instructions for one agent. Point your agent here and let it go. **This file is edited and iterated on by the human**.
+**Timeframe principal:** M15 (15 minutos)
 
-By design, training runs for a **fixed 5-minute time budget** (wall clock, excluding startup/compilation), regardless of the details of your compute. The metric is **val_bpb** (validation bits per byte) — lower is better, and vocab-size-independent so architectural changes are fairly compared.
+---
 
-If you are new to neural networks, this ["Dummy's Guide"](https://x.com/hooeem/status/2030720614752039185) looks pretty good for a lot more context.
-
-## Quick start
-
-**Requirements:** A single NVIDIA GPU (tested on H100), Python 3.10+, [uv](https://docs.astral.sh/uv/).
+## Quick Start
 
 ```bash
-
-# 1. Install uv project manager (if you don't already have it)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# 2. Install dependencies
+# 1. Instalar dependencias
 uv sync
 
-# 3. Download data and train tokenizer (one-time, ~2 min)
-uv run prepare.py
+# 2. Configurar credenciales
+cp .env.example .env
+# Editar .env con tus API keys
 
-# 4. Manually run a single training experiment (~5 min)
-uv run train.py
+# 3. Preparar datos históricos
+uv run python prepare.py
+
+# 4. Ejecutar loop de experimentación
+uv run python agent.py
 ```
 
-If the above commands all work ok, your setup is working and you can go into autonomous research mode.
+---
 
-## Running the agent
-
-Simply spin up your Claude/Codex or whatever you want in this repo (and disable all permissions), then you can prompt something like:
+## Estructura del Proyecto
 
 ```
-Hi have a look at program.md and let's kick off a new experiment! let's do the setup first.
+autoresearch/
+├── program.md              ← Instrucciones para el agente (humano edita)
+├── strategy.py             ← Estrategia de trading (agente modifica)
+│
+├── backtest.py             ← Motor de backtesting con WFV [FIJO]
+├── data.py                 ← Descarga/caching de datos OHLCV [FIJO]
+├── execute.py              ← Envío de órdenes a MT5 [FIJO]
+├── agent.py                ← Loop principal del autoresearch [FIJO]
+├── monitor.py              ← Métricas + alertas [FIJO]
+├── risk.py                 ← Validaciones de riesgo [FIJO]
+├── config.py               ← Carga de credenciales [FIJO]
+│
+├── experiments.db          ← SQLite: log de experimentos
+├── best_strategy.py        ← Snapshot del mejor Sharpe
+├── results.tsv             ← Resultados tabulares
+│
+├── agents.md               ← Roles y responsabilidades del agente
+├── architecture.md          ← Arquitectura del sistema
+├── .env                    ← Credenciales (NO commitear)
+└── pyproject.toml          ← Dependencias
 ```
 
-The `program.md` file is essentially a super lightweight "skill".
+### Archivos Editables vs Fijos
 
-## Project structure
+| Archivo | Editable por | Propósito |
+|---------|-------------|-----------|
+| `program.md` | Humano | Instrucciones para el agente |
+| `strategy.py` | Agente LLM | Lógica de trading |
+| `backtest.py` | NINGUNO | Métrica fija de comparación |
+| `data.py` | NINGUNO | Interface de datos estable |
+| `execute.py` | NINGUNO | Ejecución predecible |
+| `agent.py` | NINGUNO | Loop principal no mutable |
+| `monitor.py` | NINGUNO | Alertas consistentes |
+| `risk.py` | NINGUNO | Validaciones innegociables |
+
+---
+
+## Métricas de Validación
+
+### Walk-Forward Validation (WFV)
+
+El sistema usa **ventanas deslizantes** en lugar de un split 80/20 estático:
 
 ```
-prepare.py      — constants, data prep + runtime utilities (do not modify)
-train.py        — model, optimizer, training loop (agent modifies this)
-program.md      — agent instructions
-pyproject.toml  — dependencies
+Datos:  TRAIN_1 | TEST_1 | TRAIN_2 | TEST_2 | ... | TRAIN_6 | TEST_6
+
+sharpe_wfv = mean(sharpe_oos_windows) - 0.5 * std(sharpe_oos_windows)
 ```
 
-## Design choices
+### Constraints
 
-- **Single file to modify.** The agent only touches `train.py`. This keeps the scope manageable and diffs reviewable.
-- **Fixed time budget.** Training always runs for exactly 5 minutes, regardless of your specific platform. This means you can expect approx 12 experiments/hour and approx 100 experiments while you sleep. There are two upsides of this design decision. First, this makes experiments directly comparable regardless of what the agent changes (model size, batch size, architecture, etc). Second, this means that autoresearch will find the most optimal model for your platform in that time budget. The downside is that your runs (and results) become not comparable to other people running on other compute platforms.
-- **Self-contained.** No external dependencies beyond PyTorch and a few small packages. No distributed training, no complex configs. One GPU, one file, one metric.
+| Métrica | Requerimiento | Razón |
+|---------|--------------|-------|
+| `sharpe_wfv` | ≥ 0 | No perder dinero en promedio |
+| `avg_max_drawdown` | < 0.15 | Nunca > 15% drawdown |
+| `total_trades` | ≥ 200 | Significancia estadística |
 
-## Platform support
+### Métricas Reportadas
 
-This code currently requires that you have a single NVIDIA GPU. In principle it is quite possible to support CPU, MPS and other platforms but this would also bloat the code. I'm not 100% sure that I want to take this on personally right now. People can reference (or have their agents reference) the full/parent nanochat repository that has wider platform support and shows the various solutions (e.g. a Flash Attention 3 kernels fallback implementation, generic device support, autodetection, etc.), feel free to create forks or discussions for other platforms and I'm happy to link to them here in the README in some new notable forks section or etc.
+```python
+{
+    "sharpe_wfv": 1.31,          # ← MÉTRICA PRINCIPAL
+    "sharpe_mean_oos": 1.47,
+    "sharpe_std_oos": 0.32,
+    "avg_max_drawdown": 0.087,
+    "total_trades": 847,
+    "avg_win_rate": 0.54,
+    "avg_profit_factor": 1.61,
+    "is_valid": true
+}
+```
 
-Seeing as there seems to be a lot of interest in tinkering with autoresearch on much smaller compute platforms than an H100, a few extra words. If you're going to try running autoresearch on smaller computers (Macbooks etc.), I'd recommend one of the forks below. On top of this, here are some recommendations for how to tune the defaults for much smaller models for aspiring forks:
+---
 
-1. To get half-decent results I'd use a dataset with a lot less entropy, e.g. this [TinyStories dataset](https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean). These are GPT-4 generated short stories. Because the data is a lot narrower in scope, you will see reasonable results with a lot smaller models (if you try to sample from them after training).
-2. You might experiment with decreasing `vocab_size`, e.g. from 8192 down to 4096, 2048, 1024, or even - simply byte-level tokenizer with 256 possibly bytes after utf-8 encoding.
-3. In `prepare.py`, you'll want to lower `MAX_SEQ_LEN` a lot, depending on the computer even down to 256 etc. As you lower `MAX_SEQ_LEN`, you may want to experiment with increasing `DEVICE_BATCH_SIZE` in `train.py` slightly to compensate. The number of tokens per fwd/bwd pass is the product of these two.
-4. Also in `prepare.py`, you'll want to decrease `EVAL_TOKENS` so that your validation loss is evaluated on a lot less data.
-5. In `train.py`, the primary single knob that controls model complexity is the `DEPTH` (default 8, here). A lot of variables are just functions of this, so e.g. lower it down to e.g. 4.
-6. You'll want to most likely use `WINDOW_PATTERN` of just "L", because "SSSL" uses alternating banded attention pattern that may be very inefficient for you. Try it.
-7. You'll want to lower `TOTAL_BATCH_SIZE` a lot, but keep it powers of 2, e.g. down to `2**14` (~16K) or so even, hard to tell.
+## Configuración
 
-I think these would be the reasonable hyperparameters to play with. Ask your favorite coding agent for help and copy paste them this guide, as well as the full source code.
+### Variables de Entorno (.env)
 
-## Notable forks
+```bash
+# LLM (requerido)
+OPENROUTER_API_KEY=sk-or-...
+LLM_MODEL=minimax/minimax-m1  # Modelo gratuito disponible
 
-- [miolini/autoresearch-macos](https://github.com/miolini/autoresearch-macos) (MacOS)
-- [trevin-creator/autoresearch-mlx](https://github.com/trevin-creator/autoresearch-mlx) (MacOS)
-- [jsegov/autoresearch-win-rtx](https://github.com/jsegov/autoresearch-win-rtx) (Windows)
-- [andyluo7/autoresearch](https://github.com/andyluo7/autoresearch) (AMD)
+# MT5 (forex/gold)
+MT5_LOGIN=123456
+MT5_PASSWORD=secret
+MT5_SERVER=Broker-Demo
 
-## License
+# Sistema
+MODE=paper                       # "paper" | "live"
+MAX_DAILY_LOSS_PCT=0.02
 
-MIT
+# Walk-Forward Validation
+WFV_N_WINDOWS=6
+WFV_TRAIN_BARS=3000              # ~31 días en M15
+WFV_TEST_BARS=1000               # ~10 días en M15
+WFV_STEP_BARS=1000               # desplazamiento entre ventanas
+```
+
+---
+
+## Dependencias
+
+```toml
+[project]
+name = "autoresearch-trading"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "MetaTrader5",          # data + ejecución forex/gold
+    "vectorbt",             # backtesting vectorizado
+    "pandas",
+    "numpy",
+    "ta-lib",               # indicadores técnicos
+    "pandas-ta",
+    "openai",               # cliente LLM (openrouter)
+    "loguru",               # logging estructurado
+    "sqlalchemy",           # ORM para SQLite
+    "apscheduler",          # scheduling
+    "python-dotenv",        # variables de entorno
+    "psutil",               # monitoreo de recursos
+    "rich",                 # output bonito en consola
+]
+```
+
+---
+
+## Hardware
+
+- **GPU:** RTX 4060 Ti 16GB VRAM
+- **RAM:** 32GB
+- **CPU:** Intel i5-12400F
+- **OS:** Windows (WSL2 o PowerShell)
+
+---
+
+## Diseño
+
+Inspirado en [`karpathy/autoresearch`](https://github.com/karpathy/autoresearch), el sistema aplica los mismos principios al dominio de trading:
+
+1. **Un único archivo modificable** — `strategy.py` es la única variable en el loop
+2. **Métricas fijas** — `sharpe_wfv` es inmutable para comparaciones justas
+3. **Tiempo fijo** — Backtest < 30s para iteración rápida (~120 experimentos/hora)
+4. **Autonomía** — El agente corre indefinidamente sin preguntar
+
+### Por qué Walk-Forward Validation
+
+Un split estático 80/20 es frágil:
+- La estrategia puede sobreajustar a un período específico
+- No hay forma de saber si funcionará en datos futuros
+
+WFV es más robusto:
+- Evalúa la estrategia en múltiples ventanas temporales
+- La penalización por varianza (`- 0.5 * std`) premia estrategias estables
+- Más representativo del comportamiento real en producción
+
+---
+
+## Documentación Adicional
+
+- [`agents.md`](agents.md) — Roles y responsabilidades del agente
+- [`architecture.md`](architecture.md) — Arquitectura detallada del sistema
+- [`autoresearch_trading_prompt_v2.md`](autoresearch_trading_prompt_v2.md) — Especificaciones técnicas completas
